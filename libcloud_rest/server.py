@@ -3,17 +3,77 @@
 #fix path
 import os
 import sys
+import logging
+
+from optparse import OptionParser
+
 sys.path.append(os.sep.join(
     os.path.dirname(os.path.abspath(__file__)).split(os.sep)[:-1]))
 
-from libcloud_rest.application import LibcloudRestApp
+from werkzeug.serving import run_simple
+
+import libcloud_rest
+from libcloud_rest.log import get_logger
+
+VALID_LOG_LEVELS = ['DEBUG', 'ERROR', 'FATAL', 'CRITICAL', 'INFO', 'WARNING']
 
 
-def cli_start_server():
-    from werkzeug.serving import run_simple
+def start_server(host, port, logger):
+    from libcloud_rest.application import LibcloudRestApp
 
     app = LibcloudRestApp()
-    run_simple('127.0.0.1', 5000, app, use_debugger=True, use_reloader=True)
+    logger.info('HTTP server listening on %s:%s' % (host, port))
+    run_simple(host, port, app, use_debugger=True, use_reloader=True)
+
+
+def setup_logger(log_level, log_file):
+    # Mute default werkzeug logger
+    logger = logging.getLogger('werkzeug')
+    logger.setLevel(logging.ERROR)
+
+    # Setup main logger
+    if not log_file:
+        handler = logging.StreamHandler()
+    else:
+        handler = logging.FileHandler(filename=log_file)
+
+    logger = get_logger(handler=handler, level=log_level)
+    libcloud_rest.log.logger = logger
+    return logger
+
+
+def main():
+    usage = 'usage: %prog'
+    parser = OptionParser(usage=usage)
+    parser.add_option('--host', dest='host', default='localhost',
+                  help='Host to bind to', metavar='HOST')
+    parser.add_option('--port', dest='port', default=5000,
+                  help='Port to listen on', metavar='PORT')
+    parser.add_option('--log-level', dest='log_level', default='info',
+                  help='Log level', metavar='LEVEL')
+    parser.add_option('--log-file', dest='log_file', default=None,
+                  help='Log file path. If not provided logs will go to stdout',
+                  metavar='PATH')
+    parser.add_option('--debug', dest='debug', default=False,
+                  action='store_true', help='Enable debug mode')
+
+    (options, args) = parser.parse_args()
+
+    log_level = options.log_level.upper()
+    log_file = options.log_file
+
+    if log_level not in VALID_LOG_LEVELS:
+        valid_levels = [value.lower() for value in VALID_LOG_LEVELS]
+        raise ValueError('Invalid log level: %s. Valid log levels are: %s' %
+                (options.log_level, ', ' .join(valid_levels)))
+
+    if options.debug:
+        log_level = 'DEBUG'
+
+    level = getattr(logging, log_level, logging.INFO)
+
+    logger = setup_logger(log_level=level, log_file=log_file)
+    start_server(host=options.host, port=int(options.port), logger=logger)
 
 if __name__ == '__main__':
-    cli_start_server()
+    main()
